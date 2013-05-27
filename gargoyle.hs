@@ -1,22 +1,27 @@
-import Network.Socket
+-- import Network.Socket
+
+import Network.Socket hiding (send, sendTo, recv, recvFrom)
+import Network.Socket.ByteString
+
 import System.IO
-import Control.Exception
+import Control.Exception 
 import Control.Concurrent
 import Control.Concurrent.Chan
-import Control.Monad
-import Control.Monad.Fix (fix)
+-- import Control.Monad
+-- import Control.Monad.Fix (fix)
 
-import Data.Int
+import Data.Word
+import Data.ByteString as D
  
 type Msg = (Int, String)
 
--- +----+-----+-------+------+----------+----------+
--- |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
--- +----+-----+-------+------+----------+----------+
--- | 1  |  1  | X'00' |  1   | Variable |    2     |
--- +----+-----+-------+------+----------+----------+
-data IP = IPv4 Int32 | IPv6 Int64 deriving (Show)
-data Socks5ClientResponse = Socks5ClientResponse Int8 Int8 Int8 Int8 IP Int16 deriving (Show)
+-- Session handshake
+data SessionRequest  = SessionRequest  Word8 Word8 [Word8] deriving (Show)
+data SessionResponse = SessionResponse Word8 Word8         deriving (Show)
+
+-- Command's request/response
+data CommandRequest  = CommandRequest  Word8 Word8 Word8 Word8 [Word8] Word16 deriving (Show)
+data CommandResponse = CommandResponse Word8 Word8 Word8 Word8 [Word8] Word16 deriving (Show)
  
 main :: IO ()
 main = do
@@ -37,21 +42,30 @@ socksConnection sock nr = do
 -- Print information about the client's connection
 informConnection :: (SockAddr) -> IO ()
 informConnection (SockAddrInet port host_ip) = do
-	(inet_ntoa host_ip) >>= putStrLn
+    (inet_ntoa host_ip) >>= System.IO.putStrLn
 
-getSocks5ClientResponse :: Socket -> IO ()
-getSocks5ClientResponse sock = do
-	putStrLn "getSocks5Response"
-    -- Socks5ClientResponse 10
+makeSessionRequest :: [Word8] -> SessionRequest
+makeSessionRequest (version:nmethos:methods) = SessionRequest version nmethos methods
 
+getSessionRequest :: Socket -> IO (SessionRequest)
+getSessionRequest sock = do
+    buffer <- recv sock 3
+    return $ makeSessionRequest $ unpack buffer
+
+
+printByteString :: [Word8] -> IO ()
+printByteString (x:y:z:xs) = do
+    System.IO.putStrLn $ show x
+    System.IO.putStrLn $ show y
+    System.IO.putStrLn $ show z
 
 runConn :: (Socket, SockAddr) -> Int -> IO ()
 runConn (sock, sock_addr) nr = do
-    -- let broadcast msg = writeChan chan (nr, msg)
+    
     informConnection sock_addr
 
-    a <- recv sock 256
+    response <- getSessionRequest sock
 
-    putStrLn a
+    System.IO.putStrLn $ show response
 
     sClose sock

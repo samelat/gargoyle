@@ -1,4 +1,4 @@
 gargoyle
 ========
 
-Socks5 server in Haskell
+A Simple Haskell Socks5 Server
