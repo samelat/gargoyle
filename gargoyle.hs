@@ -20,7 +20,7 @@ type Msg = (Int, String)
 auth_methods = [0]
 
 -- Session handshake
-data SessionRequest  = SessionRequest  Word8 Word8 [Word8] deriving (Show)
+data SessionRequest  = SessionRequest  Int Int [Int] deriving (Show)
 data SessionResponse = SessionResponse Word8 Word8         deriving (Show)
 
 -- Command's request/response
@@ -47,13 +47,13 @@ informConnection :: (SockAddr) -> IO ()
 informConnection (SockAddrInet port host_ip) = do
     (inet_ntoa host_ip) >>= System.IO.putStrLn
 
-makeSessionRequest :: [Word8] -> SessionRequest
+makeSessionRequest :: [Int] -> SessionRequest
 makeSessionRequest (version:nmethos:methods) = SessionRequest version nmethos methods
 
 getSessionRequest :: Socket -> IO (SessionRequest)
 getSessionRequest sock = do
     buffer <- recv sock 3
-    return $ makeSessionRequest $ unpack buffer
+    return $ makeSessionRequest $ map (\x -> fromIntegral x :: Int) $ unpack buffer
 
 printByteString :: [Word8] -> IO ()
 printByteString (x:y:z:xs) = do
@@ -63,17 +63,25 @@ printByteString (x:y:z:xs) = do
 
 isValidSessionRequest :: SessionRequest -> Bool
 isValidSessionRequest (SessionRequest version count methods)
-    | version /= (fromIntegral 4 :: Word8) && version /= (fromIntegral 5 :: Word8) = False
+    | version /= 4 && version /= 5 = False
     | count == 0 = False
     | length methods == 0 = False
     | length methods /= (fromIntegral count :: Int) = False
     | otherwise = True
 
-replySessionRequest :: SessionRequest -> IO (Bool)
-replySessionRequest request_session = do
-    putStrLn $ show $ isValidSessionRequest request_session
-    if isValidSessionRequest request_session
-    return True
+replySessionRequest :: Socket -> SessionRequest -> IO (Bool)
+replySessionRequest sock request_session
+    | not $ isValidSessionRequest request_session = return False
+    | 0 elem (methods request_session) = withoutAuth
+    | otherwise = reject
+    where
+        methods (SessionRequest version count meths) = meths
+        withoutAuth = do
+            putStrLn $ show $ isValidSessionRequest request_session
+            return True
+        reject = do
+            putStrLn $ show $ isValidSessionRequest request_session
+            return True
 
 runConn :: (Socket, SockAddr) -> Int -> IO ()
 runConn (sock, sock_addr) nr = do
@@ -83,6 +91,6 @@ runConn (sock, sock_addr) nr = do
     session_request <- getSessionRequest sock
     System.IO.putStrLn $ show session_request
 
-    replySessionRequest session_request
+    replySessionRequest sock session_request
 
     sClose sock
