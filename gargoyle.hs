@@ -20,12 +20,24 @@ type Msg = (Int, String)
 auth_methods = [0]
 
 -- Session handshake
-data SessionRequest  = SessionRequest  Int Int [Int] deriving (Show)
-data SessionResponse = SessionResponse Word8 Word8         deriving (Show)
+data SessionRequest  = SessionRequest {
+    sreq_version :: Int,
+    sreq_count   :: Int,
+    sreq_methods :: [Int] } deriving (Show)
+
+data SessionResponse = SessionResponse {
+    sres_version :: Int,
+    sres_method  :: Int }   deriving (Show)
 
 -- Command's request/response
-data CommandRequest  = CommandRequest  Word8 Word8 Word8 Word8 [Word8] Word16 deriving (Show)
-data CommandResponse = CommandResponse Word8 Word8 Word8 Word8 [Word8] Word16 deriving (Show)
+data CommandRequest  = CommandRequest {
+    creq_version   :: Int,
+    creq_command   :: Int,
+    creq_addr_type :: Int,
+    creq_dst_addr  :: Int,
+    creq_dst_port  :: Int } deriving (Show)
+
+type CommandResponse = CommandRequest
 
 main :: IO ()
 main = do
@@ -69,19 +81,22 @@ isValidSessionRequest (SessionRequest version count methods)
     | length methods /= (fromIntegral count :: Int) = False
     | otherwise = True
 
+sendSessionResponse :: Socket -> SessionResponse -> IO ()
+sendSessionResponse sock session_response = do
+    putStrLn "A"
+
 replySessionRequest :: Socket -> SessionRequest -> IO (Bool)
 replySessionRequest sock request_session
-    | not $ isValidSessionRequest request_session = return False
-    | 0 elem (methods request_session) = withoutAuth
+    | not $ isValidSessionRequest request_session = reject
+    | 0 `elem` (sreq_methods request_session) = withoutAuth
     | otherwise = reject
     where
-        methods (SessionRequest version count meths) = meths
         withoutAuth = do
-            putStrLn $ show $ isValidSessionRequest request_session
+            sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0
             return True
         reject = do
-            putStrLn $ show $ isValidSessionRequest request_session
-            return True
+            sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
+            return False
 
 runConn :: (Socket, SockAddr) -> Int -> IO ()
 runConn (sock, sock_addr) nr = do
