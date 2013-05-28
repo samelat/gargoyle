@@ -11,9 +11,13 @@ import Control.Concurrent.Chan
 -- import Control.Monad.Fix (fix)
 
 import Data.Word
-import Data.ByteString as D
- 
+import Data.ByteString (unpack)
+
 type Msg = (Int, String)
+
+-- Valid Authentication Methods
+-- 0 - Without Auth
+auth_methods = [0]
 
 -- Session handshake
 data SessionRequest  = SessionRequest  Word8 Word8 [Word8] deriving (Show)
@@ -22,10 +26,9 @@ data SessionResponse = SessionResponse Word8 Word8         deriving (Show)
 -- Command's request/response
 data CommandRequest  = CommandRequest  Word8 Word8 Word8 Word8 [Word8] Word16 deriving (Show)
 data CommandResponse = CommandResponse Word8 Word8 Word8 Word8 [Word8] Word16 deriving (Show)
- 
+
 main :: IO ()
 main = do
-    chan <- newChan
     sock <- socket AF_INET Stream 0
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet 1080 iNADDR_ANY)
@@ -37,7 +40,7 @@ socksConnection :: Socket -> Int -> IO ()
 socksConnection sock nr = do
     conn <- accept sock
     forkIO (runConn conn nr)
-    socksConnection sock $! nr+1
+    socksConnection sock $ nr + 1
 
 -- Print information about the client's connection
 informConnection :: (SockAddr) -> IO ()
@@ -52,20 +55,34 @@ getSessionRequest sock = do
     buffer <- recv sock 3
     return $ makeSessionRequest $ unpack buffer
 
-
 printByteString :: [Word8] -> IO ()
 printByteString (x:y:z:xs) = do
     System.IO.putStrLn $ show x
     System.IO.putStrLn $ show y
     System.IO.putStrLn $ show z
 
+isValidSessionRequest :: SessionRequest -> Bool
+isValidSessionRequest (SessionRequest version count methods)
+    | version /= (fromIntegral 4 :: Word8) && version /= (fromIntegral 5 :: Word8) = False
+    | count == 0 = False
+    | length methods == 0 = False
+    | length methods /= (fromIntegral count :: Int) = False
+    | otherwise = True
+
+replySessionRequest :: SessionRequest -> IO (Bool)
+replySessionRequest request_session = do
+    putStrLn $ show $ isValidSessionRequest request_session
+    if isValidSessionRequest request_session
+    return True
+
 runConn :: (Socket, SockAddr) -> Int -> IO ()
 runConn (sock, sock_addr) nr = do
     
     informConnection sock_addr
 
-    response <- getSessionRequest sock
+    session_request <- getSessionRequest sock
+    System.IO.putStrLn $ show session_request
 
-    System.IO.putStrLn $ show response
+    replySessionRequest session_request
 
     sClose sock
