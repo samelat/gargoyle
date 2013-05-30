@@ -11,7 +11,7 @@ import Control.Concurrent.Chan
 -- import Control.Monad.Fix (fix)
 
 import Data.Word
-import Data.ByteString (unpack)
+import Data.ByteString (unpack, pack)
 
 type Msg = (Int, String)
 
@@ -39,26 +39,14 @@ data CommandRequest  = CommandRequest {
 
 type CommandResponse = CommandRequest
 
-main :: IO ()
-main = do
-    sock <- socket AF_INET Stream 0
-    setSocketOption sock ReuseAddr 1
-    bindSocket sock (SockAddrInet 1080 iNADDR_ANY)
-    listen sock 2
-
-    socksConnection sock 0
-
-socksConnection :: Socket -> Int -> IO ()
-socksConnection sock nr = do
-    conn <- accept sock
-    forkIO (runConn conn nr)
-    socksConnection sock $ nr + 1
-
 -- Print information about the client's connection
 informConnection :: (SockAddr) -> IO ()
 informConnection (SockAddrInet port host_ip) = do
     (inet_ntoa host_ip) >>= System.IO.putStrLn
 
+-- #################### TCP Connecton Command #################### --
+
+-- #################### Session Management #################### --
 makeSessionRequest :: [Int] -> SessionRequest
 makeSessionRequest (version:nmethos:methods) = SessionRequest version nmethos methods
 
@@ -66,12 +54,6 @@ getSessionRequest :: Socket -> IO (SessionRequest)
 getSessionRequest sock = do
     buffer <- recv sock 3
     return $ makeSessionRequest $ map (\x -> fromIntegral x :: Int) $ unpack buffer
-
-printByteString :: [Word8] -> IO ()
-printByteString (x:y:z:xs) = do
-    System.IO.putStrLn $ show x
-    System.IO.putStrLn $ show y
-    System.IO.putStrLn $ show z
 
 isValidSessionRequest :: SessionRequest -> Bool
 isValidSessionRequest (SessionRequest version count methods)
@@ -81,9 +63,12 @@ isValidSessionRequest (SessionRequest version count methods)
     | length methods /= (fromIntegral count :: Int) = False
     | otherwise = True
 
-sendSessionResponse :: Socket -> SessionResponse -> IO ()
+-- We must handle the IOError exception
+sendSessionResponse :: Socket -> SessionResponse -> IO (Int)
 sendSessionResponse sock session_response = do
-    putStrLn "A"
+    sendAll sock $ pack [(fromIntegral (sres_version session_response) :: Word8),
+                         (fromIntegral (sres_method  session_response) :: Word8)]
+    return 0
 
 replySessionRequest :: Socket -> SessionRequest -> IO (Bool)
 replySessionRequest sock request_session
@@ -92,14 +77,18 @@ replySessionRequest sock request_session
     | otherwise = reject
     where
         withoutAuth = do
-            sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0
-            return True
+            error <- sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0
+            putStrLn $ show error
+            if error == 0 then
+                return True
+            else
+                return False
         reject = do
             sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
             return False
 
-runConn :: (Socket, SockAddr) -> Int -> IO ()
-runConn (sock, sock_addr) nr = do
+serveConnection :: (Socket, SockAddr) -> Int -> IO ()
+serveConnection (sock, sock_addr) nr = do
     
     informConnection sock_addr
 
@@ -109,3 +98,18 @@ runConn (sock, sock_addr) nr = do
     replySessionRequest sock session_request
 
     sClose sock
+
+socksConnection :: Socket -> Int -> IO ()
+socksConnection sock nr = do
+    conn <- accept sock
+    forkIO (serveConnection conn nr)
+    socksConnection sock $ nr + 1
+
+main :: IO ()
+main = do
+    sock <- socket AF_INET Stream 0
+    setSocketOption sock ReuseAddr 1
+    bindSocket sock (SockAddrInet 1080 iNADDR_ANY)
+    listen sock 2
+
+    socksConnection sock 0
