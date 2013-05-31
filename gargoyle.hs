@@ -34,8 +34,8 @@ data CommandRequest  = CommandRequest {
     creq_version   :: Int,
     creq_command   :: Int,
     creq_addr_type :: Int,
-    creq_dst_addr  :: Int,
-    creq_dst_port  :: Int } deriving (Show)
+    creq_dst_addr  :: Word32,
+    creq_dst_port  :: Word16 } deriving (Show)
 
 type CommandResponse = CommandRequest
 
@@ -45,6 +45,14 @@ informConnection (SockAddrInet port host_ip) = do
     (inet_ntoa host_ip) >>= System.IO.putStrLn
 
 -- #################### TCP Connecton Command #################### --
+makeSessionRequest :: [Int] -> CommandRequest
+makeSessionRequest (version:nmethos:methods) = SessionRequest version nmethos methods
+
+getCommandRequest :: Socket -> IO (CommandRequest)
+getCommandRequest sock = do
+    -- Asumimos, por ahora, que siempre hablamos de IPv4
+    buffer <- recv sock 10
+    return $ makeSessionRequest $ map (\x -> fromIntegral x :: Int) $ unpack buffer
 
 -- #################### Session Management #################### --
 makeSessionRequest :: [Int] -> SessionRequest
@@ -87,8 +95,7 @@ replySessionRequest sock request_session
             sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
             return False
 
-waitForSession
-
+-- ################## General Handling ################# --
 serveConnection :: (Socket, SockAddr) -> Int -> IO ()
 serveConnection (sock, sock_addr) nr = do
     
@@ -97,12 +104,15 @@ serveConnection (sock, sock_addr) nr = do
     session_request <- getSessionRequest sock
     System.IO.putStrLn $ show session_request
 
-    -- MIRAR SI NO HAY NA MANERA MAS "ELEGANTE" DE HACER ESTO
+    -- MIRAR SI NO HAY UNA MANERA MAS "ELEGANTE" DE HACER ESTO
     result_value <- replySessionRequest sock session_request
     if result_value then
         putStrLn "Atendemos la solicitud"
-    else
-        putStrLn "Cerramos la conexion"
+    else do
+        sClose sock
+        putStrLn "Connection closed"
+
+
 
     sClose sock
 
