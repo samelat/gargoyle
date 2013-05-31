@@ -87,6 +87,8 @@ replySessionRequest sock request_session
             sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
             return False
 
+waitForSession
+
 serveConnection :: (Socket, SockAddr) -> Int -> IO ()
 serveConnection (sock, sock_addr) nr = do
     
@@ -95,7 +97,12 @@ serveConnection (sock, sock_addr) nr = do
     session_request <- getSessionRequest sock
     System.IO.putStrLn $ show session_request
 
-    replySessionRequest sock session_request
+    -- MIRAR SI NO HAY NA MANERA MAS "ELEGANTE" DE HACER ESTO
+    result_value <- replySessionRequest sock session_request
+    if result_value then
+        putStrLn "Atendemos la solicitud"
+    else
+        putStrLn "Cerramos la conexion"
 
     sClose sock
 
