@@ -10,6 +10,7 @@ import Control.Concurrent.Chan
 -- import Control.Monad
 -- import Control.Monad.Fix (fix)
 
+import Data.Bits
 import Data.Word
 import Data.ByteString (unpack, pack)
 
@@ -45,14 +46,27 @@ informConnection (SockAddrInet port host_ip) = do
     (inet_ntoa host_ip) >>= System.IO.putStrLn
 
 -- #################### TCP Connecton Command #################### --
-makeSessionRequest :: [Int] -> CommandRequest
-makeSessionRequest (version:nmethos:methods) = SessionRequest version nmethos methods
 
-getCommandRequest :: Socket -> IO (CommandRequest)
+makeCommandRequest :: [Word8] -> CommandRequest
+makeCommandRequest buffer = CommandRequest version
+                                           command
+                                           addr_type
+                                           addr
+                                           port
+    where version   = fromIntegral (buffer !! 0) :: Int
+          command   = fromIntegral (buffer !! 1) :: Int
+          addr_type = fromIntegral (buffer !! 2) :: Int
+          addr      = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 3 4) :: Word32
+          port      = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 5 2) :: Word16
+          between index count = fst $ splitAt count $ snd (splitAt index buffer)
+
+getCommandRequest :: Socket -> IO (Int)
 getCommandRequest sock = do
     -- Asumimos, por ahora, que siempre hablamos de IPv4
     buffer <- recv sock 10
-    return $ makeSessionRequest $ map (\x -> fromIntegral x :: Int) $ unpack buffer
+    putStrLn $ show $ makeCommandRequest $ unpack buffer
+    --toWord32 tuple = foldl (\acc x -> (shiftL acc 8) + x) 0 tuple
+    return 0
 
 -- #################### Session Management #################### --
 makeSessionRequest :: [Int] -> SessionRequest
@@ -106,6 +120,7 @@ serveConnection (sock, sock_addr) nr = do
 
     -- MIRAR SI NO HAY UNA MANERA MAS "ELEGANTE" DE HACER ESTO
     result_value <- replySessionRequest sock session_request
+    result_value2 <- getCommandRequest sock
     if result_value then
         putStrLn "Atendemos la solicitud"
     else do
