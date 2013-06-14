@@ -34,9 +34,7 @@ data SessionResponse = SessionResponse {
 data CommandRequest  = CommandRequest {
     creq_version   :: Int,
     creq_command   :: Int,
-    creq_addr_type :: Int,
-    creq_dst_addr  :: Word32,
-    creq_dst_port  :: Word16 } deriving (Show)
+    creq_addr_type :: SockAddr } deriving (Show)
 
 type CommandResponse = CommandRequest
 
@@ -47,23 +45,31 @@ informConnection (SockAddrInet port host_ip) = do
 
 -- #################### TCP Connecton Command #################### --
 
+
+getConnectionInfo :: [Word8] -> SockAddr
+getConnectionInfo buffer
+    | addr_type == 1 = SockAddrInet 123456 2222
+    | addr_type == 3 = SockAddrInet (hostname_to_ip between ) 1111
+    where addr_type = fromIntegral (buffer !! 3) :: Int
+          hostname_to_ip bytes = 654321
+          between index count = fst $ splitAt count $ snd (splitAt index buffer)
+
 makeCommandRequest :: [Word8] -> CommandRequest
 makeCommandRequest buffer = CommandRequest version
                                            command
-                                           addr_type
-                                           addr
-                                           port
+                                           connection_info
     where version   = fromIntegral (buffer !! 0) :: Int
           command   = fromIntegral (buffer !! 1) :: Int
-          addr_type = fromIntegral (buffer !! 2) :: Int
-          addr      = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 3 4) :: Word32
-          port      = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 5 2) :: Word16
-          between index count = fst $ splitAt count $ snd (splitAt index buffer)
+          connection_info = getConnectionInfo buffer
+          -- addr_type = fromIntegral (buffer !! 2) :: Int
+          -- host      = case addr_type of fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 3 4) :: Word32
+          -- port      = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 5 2) :: Word16
+          -- between index count = fst $ splitAt count $ snd (splitAt index buffer)
 
 getCommandRequest :: Socket -> IO (Int)
 getCommandRequest sock = do
     -- Asumimos, por ahora, que siempre hablamos de IPv4
-    buffer <- recv sock 10
+    buffer <- recv sock 1024
     putStrLn $ show $ makeCommandRequest $ unpack buffer
     --toWord32 tuple = foldl (\acc x -> (shiftL acc 8) + x) 0 tuple
     return 0
