@@ -49,16 +49,18 @@ informConnection (SockAddrInet port host_ip) = do
 
 getConnectionInfo :: [Word8] -> IO (SockAddr)
 getConnectionInfo buffer
-    | addr_type == 1 = return $ SockAddrInet $ port 8 host
+    | addr_type == 1 = return $ SockAddrInet (PortNum $ port 8) host
     | addr_type == 3 = sock_addr_from_hostname
     where sock_addr_from_hostname = do
-            host_ip <- hostname_to_ip $ between 5 (fromIntegral (buffer !! 4) :: Int)
-            return $ SockAddrInet 1111 host_ip
-          port index = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between index 2) :: Word16
+            host_ip <- hostname_to_ip $ between 5 hostname_size
+            return $ SockAddrInet (PortNum $ port (hostname_size + 5)) host_ip
+          -- port index = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between index 2) :: Word16
+		  port index = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between index 2) :: Word16
           host = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 4 4) :: Word32
           addr_type  = fromIntegral (buffer !! 3) :: Int
           hostname_to_ip bytes = fmap hostAddress (getHostByName $ Char8.unpack $ pack bytes)
           between index count = fst $ splitAt count $ snd (splitAt index buffer)
+          hostname_size = fromIntegral (buffer !! 4) :: Int
 
 makeCommandRequest :: [Word8] -> IO (CommandRequest)
 makeCommandRequest buffer = do
