@@ -1,5 +1,6 @@
 -- import Network.Socket
 
+import Network.BSD
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
 
@@ -12,7 +13,8 @@ import Control.Concurrent.Chan
 
 import Data.Bits
 import Data.Word
-import Data.ByteString (unpack, pack)
+import Data.ByteString (pack, unpack)
+import qualified Data.ByteString.Char8 as Char8
 
 type Msg = (Int, String)
 
@@ -45,32 +47,32 @@ informConnection (SockAddrInet port host_ip) = do
 
 -- #################### TCP Connecton Command #################### --
 
-
-getConnectionInfo :: [Word8] -> SockAddr
+getConnectionInfo :: [Word8] -> IO (SockAddr)
 getConnectionInfo buffer
-    | addr_type == 1 = SockAddrInet 123456 2222
-    | addr_type == 3 = SockAddrInet (hostname_to_ip between ) 1111
-    where addr_type = fromIntegral (buffer !! 3) :: Int
-          hostname_to_ip bytes = 654321
+    | addr_type == 1 = return $ SockAddrInet $ port 8 host
+    | addr_type == 3 = sock_addr_from_hostname
+    where sock_addr_from_hostname = do
+            host_ip <- hostname_to_ip $ between 5 (fromIntegral (buffer !! 4) :: Int)
+            return $ SockAddrInet 1111 host_ip
+          port index = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between index 2) :: Word16
+          host = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 4 4) :: Word32
+          addr_type  = fromIntegral (buffer !! 3) :: Int
+          hostname_to_ip bytes = fmap hostAddress (getHostByName $ Char8.unpack $ pack bytes)
           between index count = fst $ splitAt count $ snd (splitAt index buffer)
 
-makeCommandRequest :: [Word8] -> CommandRequest
-makeCommandRequest buffer = CommandRequest version
-                                           command
-                                           connection_info
+makeCommandRequest :: [Word8] -> IO (CommandRequest)
+makeCommandRequest buffer = do
+    connection_info <- getConnectionInfo buffer
+    return $ CommandRequest version command connection_info
     where version   = fromIntegral (buffer !! 0) :: Int
           command   = fromIntegral (buffer !! 1) :: Int
-          connection_info = getConnectionInfo buffer
-          -- addr_type = fromIntegral (buffer !! 2) :: Int
-          -- host      = case addr_type of fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 3 4) :: Word32
-          -- port      = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 5 2) :: Word16
-          -- between index count = fst $ splitAt count $ snd (splitAt index buffer)
 
 getCommandRequest :: Socket -> IO (Int)
 getCommandRequest sock = do
     -- Asumimos, por ahora, que siempre hablamos de IPv4
     buffer <- recv sock 1024
-    putStrLn $ show $ makeCommandRequest $ unpack buffer
+    request <- makeCommandRequest $ unpack buffer
+    putStrLn $ show $ request
     --toWord32 tuple = foldl (\acc x -> (shiftL acc 8) + x) 0 tuple
     return 0
 
