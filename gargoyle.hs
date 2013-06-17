@@ -139,11 +139,33 @@ replySessionRequest sock request_session
             sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
             return False
 -- ################## Stream forwarding ################# --
+
+tmp = "GET / HTTP/1.0\r\n\r\n"
+
 forwardStreams :: Socket -> SockData -> IO ()
 forwardStreams sock remote_host = do
-    buffer <- recv sock 4096
 
-    putStrLn $ show buffer
+    putStrLn "[!] Connecting to remote host"
+
+    tmp_sock <- socket AF_INET Stream 0
+    connect tmp_sock (SockAddrInet (PortNum $ sdata_host_port remote_host) (sdata_host_ip remote_host))
+
+    -- sendAll tmp_sock $ Char8.pack tmp
+
+    -- buffer <- recv tmp_sock 4096
+
+    -- putStrLn $ show buffer
+
+    forkIO $ streamForwarding sock tmp_sock
+
+    streamForwarding tmp_sock sock
+
+    where
+        streamForwarding in_sock out_sock = do
+            buffer <- recv in_sock 4096
+            sendAll out_sock buffer
+            streamForwarding in_sock out_sock
+
 
 -- ################## General Handling ################# --
 serveConnection :: (Socket, SockAddr) -> Int -> IO ()
