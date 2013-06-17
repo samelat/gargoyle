@@ -32,11 +32,15 @@ data SessionResponse = SessionResponse {
     sres_version :: Int,
     sres_method  :: Int }   deriving (Show)
 
+data SockData = SockData {
+    sdata_host_ip   :: Word32,
+    sdata_host_port :: Word16 } deriving (Show)
+
 -- Command's request/response
 data CommandRequest  = CommandRequest {
     creq_version   :: Int,
     creq_command   :: Int,
-    creq_addr_type :: SockAddr } deriving (Show)
+    creq_sock_data :: SockData } deriving (Show)
 
 type CommandResponse = CommandRequest
 
@@ -45,22 +49,24 @@ informConnection :: (SockAddr) -> IO ()
 informConnection (SockAddrInet port host_ip) = do
     (inet_ntoa host_ip) >>= System.IO.putStrLn
 
--- #################### TCP Connecton Command #################### --
+-- #################### TCP Connecton Command Handler #################### --
 
-getConnectionInfo :: [Word8] -> IO (SockAddr)
+-- Get the information about the host to which to connect
+-- In case of domain name (addr_type 3) we resolve it and use the first IP address
+getConnectionInfo :: [Word8] -> IO (SockData)
 getConnectionInfo buffer
-    | addr_type == 1 = return $ SockAddrInet (PortNum $ port 8) host
+    | addr_type == 1 = return $ SockData host $ port 8
     | addr_type == 3 = sock_addr_from_hostname
     where sock_addr_from_hostname = do
             host_ip <- hostname_to_ip $ between 5 hostname_size
-            return $ SockAddrInet (PortNum $ port (hostname_size + 5)) host_ip
-          -- port index = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between index 2) :: Word16
-		  port index = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between index 2) :: Word16
-          host = fromIntegral (foldl (\acc x -> (shiftL acc 8) + x) 0 $ between 4 4) :: Word32
+            return $ SockData host_ip (port (hostname_size + 5))
+          port index = foldr (\x acc -> (shiftL acc 8) + (fromIntegral x :: Word16)) 0 (between (hostname_size + 5) 2)
+          host = foldl (\acc x -> (shiftL acc 8) + (fromIntegral x :: Word32)) 0 $ between 4 4
           addr_type  = fromIntegral (buffer !! 3) :: Int
           hostname_to_ip bytes = fmap hostAddress (getHostByName $ Char8.unpack $ pack bytes)
           between index count = fst $ splitAt count $ snd (splitAt index buffer)
           hostname_size = fromIntegral (buffer !! 4) :: Int
+
 
 makeCommandRequest :: [Word8] -> IO (CommandRequest)
 makeCommandRequest buffer = do
@@ -69,14 +75,29 @@ makeCommandRequest buffer = do
     where version   = fromIntegral (buffer !! 0) :: Int
           command   = fromIntegral (buffer !! 1) :: Int
 
-getCommandRequest :: Socket -> IO (Int)
+
+getCommandRequest :: Socket -> IO (CommandRequest)
 getCommandRequest sock = do
-    -- Asumimos, por ahora, que siempre hablamos de IPv4
     buffer <- recv sock 1024
     request <- makeCommandRequest $ unpack buffer
-    putStrLn $ show $ request
-    --toWord32 tuple = foldl (\acc x -> (shiftL acc 8) + x) 0 tuple
+    return request
+
+sendCommandResponse :: Socket -> CommandResponse -> IO (Int)
+sendCommandResponse sock command_response = do
+    sendAll sock $ pack $ [(fromIntegral (creq_version command_response) :: Word8), -- Version
+                           (0 :: Word8),                                            -- Succeeded
+                           (0 :: Word8),                                            -- Reserved
+                           (1 :: Word8)] ++
+                           [0x7f, 0x00, 0x00, 0x01] ++
+                           [0x04, 0x38]
     return 0
+
+replayCommandRequest :: Socket -> CommandRequest -> IO (Bool)
+replayCommandRequest sock command_session = do
+
+    sendCommandResponse sock command_session
+
+    return True
 
 -- #################### Session Management #################### --
 makeSessionRequest :: [Int] -> SessionRequest
@@ -110,7 +131,6 @@ replySessionRequest sock request_session
     where
         withoutAuth = do
             error <- sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0
-            putStrLn $ show error
             if error == 0 then
                 return True
             else
@@ -118,6 +138,12 @@ replySessionRequest sock request_session
         reject = do
             sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
             return False
+-- ################## Stream forwarding ################# --
+forwardStreams :: Socket -> SockData -> IO ()
+forwardStreams sock remote_host = do
+    buffer <- recv sock 4096
+
+    putStrLn $ show buffer
 
 -- ################## General Handling ################# --
 serveConnection :: (Socket, SockAddr) -> Int -> IO ()
@@ -126,13 +152,21 @@ serveConnection (sock, sock_addr) nr = do
     informConnection sock_addr
 
     session_request <- getSessionRequest sock
-    System.IO.putStrLn $ show session_request
+    putStrLn $ show session_request
 
     -- MIRAR SI NO HAY UNA MANERA MAS "ELEGANTE" DE HACER ESTO
     result_value <- replySessionRequest sock session_request
-    result_value2 <- getCommandRequest sock
-    if result_value then
+
+    command_request <- getCommandRequest sock
+    putStrLn $ show command_request
+
+    replayCommandRequest sock command_request
+
+    if result_value then do
         putStrLn "Atendemos la solicitud"
+
+        forwardStreams sock (creq_sock_data command_request)
+
     else do
         sClose sock
         putStrLn "Connection closed"
