@@ -46,8 +46,11 @@ type CommandResponse = CommandRequest
 
 -- Print information about the client's connection
 informConnection :: (SockAddr) -> IO ()
-informConnection (SockAddrInet port host_ip) = do
-    (inet_ntoa host_ip) >>= System.IO.putStrLn
+informConnection socket_data = do
+    -- ip <- inet_ntoa host_ip
+    putStrLn "\n------------------- New connecton -------------------"
+    -- putStrLn $ "[!] Client IP: " ++ ip ++ ":" ++ (show port)
+    putStrLn $ "[!] Client IP: " ++ (show socket_data)
 
 -- #################### TCP Connecton Command Handler #################### --
 
@@ -138,17 +141,19 @@ replySessionRequest sock request_session
         reject = do
             sendSessionResponse sock $ SessionResponse (sreq_version request_session) 0xff
             return False
--- ################## Stream forwarding ################# --
 
-tmp = "GET / HTTP/1.0\r\n\r\n"
+
+-- ################## Stream forwarding ################# --
 
 forwardStreams :: Socket -> SockData -> IO ()
 forwardStreams sock remote_host = do
 
-    putStrLn "[!] Connecting to remote host"
+    let sock_data = SockAddrInet (PortNum (sdata_host_port remote_host)) (sdata_host_ip remote_host)
+
+    putStrLn $ "[!] Connecting to remote host: " ++ (show sock_data)
 
     tmp_sock <- socket AF_INET Stream 0
-    connect tmp_sock (SockAddrInet (PortNum $ sdata_host_port remote_host) (sdata_host_ip remote_host))
+    connect tmp_sock sock_data
 
     -- sendAll tmp_sock $ Char8.pack tmp
 
@@ -163,8 +168,13 @@ forwardStreams sock remote_host = do
     where
         streamForwarding in_sock out_sock = do
             buffer <- recv in_sock 4096
-            sendAll out_sock buffer
-            streamForwarding in_sock out_sock
+            let size = length $ unpack buffer
+            -- putStrLn $ "[!] Buffer size is: " ++ (show $ size)
+            if (size > 0) then do
+                sendAll out_sock buffer
+                streamForwarding in_sock out_sock
+            else do
+                sClose in_sock
 
 
 -- ################## General Handling ################# --
@@ -174,28 +184,22 @@ serveConnection (sock, sock_addr) nr = do
     informConnection sock_addr
 
     session_request <- getSessionRequest sock
-    putStrLn $ show session_request
+    -- putStrLn $ show session_request
 
-    -- MIRAR SI NO HAY UNA MANERA MAS "ELEGANTE" DE HACER ESTO
     result_value <- replySessionRequest sock session_request
 
-    command_request <- getCommandRequest sock
-    putStrLn $ show command_request
-
-    replayCommandRequest sock command_request
-
     if result_value then do
-        putStrLn "Atendemos la solicitud"
+
+        command_request <- getCommandRequest sock
+        -- putStrLn $ show command_request
+
+        replayCommandRequest sock command_request
 
         forwardStreams sock (creq_sock_data command_request)
 
     else do
         sClose sock
-        putStrLn "Connection closed"
-
-
-
-    sClose sock
+        putStrLn "[!] Connection closed"
 
 socksConnection :: Socket -> Int -> IO ()
 socksConnection sock nr = do
