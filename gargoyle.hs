@@ -1,4 +1,17 @@
--- import Network.Socket
+-- This program is free software; you can redistribute it and/or modify
+-- it under the terms of the GNU General Public License as published by
+-- the Free Software Foundation; either version 2 of the License, or
+-- (at your option) any later version.
+-- 
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-- GNU General Public License for more details.
+-- 
+-- You should have received a copy of the GNU General Public License
+-- along with this program; if not, write to the Free Software
+-- Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+-- MA 02110-1301, USA.
 
 import Network.BSD
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
@@ -15,6 +28,8 @@ import Data.Bits
 import Data.Word
 import Data.ByteString (pack, unpack)
 import qualified Data.ByteString.Char8 as Char8
+
+import System.Console.CmdArgs
 
 type Msg = (Int, String)
 
@@ -171,6 +186,7 @@ forwardStreams sock remote_host = do
             let size = length $ unpack buffer
             -- putStrLn $ "[!] Buffer size is: " ++ (show $ size)
             if (size > 0) then do
+                putStrLn $ "[!] Sending bytes: " ++ (show $ size)
                 sendAll out_sock buffer
                 streamForwarding in_sock out_sock
             else do
@@ -207,11 +223,37 @@ socksConnection sock nr = do
     forkIO (serveConnection conn nr)
     socksConnection sock $ nr + 1
 
-main :: IO ()
-main = do
+main_loop :: IO ()
+main_loop = do
     sock <- socket AF_INET Stream 0
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet 1080 iNADDR_ANY)
     listen sock 2
 
     socksConnection sock 0
+
+data Args = Args {
+                wordlist :: String,
+                url :: String,
+                outfile :: String,
+                disable_bruteforce :: Bool
+            }
+            deriving (Show, Data, Typeable)
+
+
+arguments = Args{wordlist = "wordlist" &= typFile &= help "The wordlist to use",
+                url = def &= argPos 0 &= typ "URL",
+                outfile = "dirhound.out" &= typFile &= help "Output file",
+                disable_bruteforce = False &= help "Don't bruteforce, only crawl"
+                } &= program "DirHound" &= summary "DirHound web server directory bruteforcer"
+
+main = do
+        parsed <- cmdArgs arguments
+        let wordlist_name = wordlist parsed
+            uri = url parsed
+            in do wlist <- if disable_bruteforce parsed then return [] else readWordlist wordlist_name
+                  hfile <- openFile (outfile parsed) WriteMode
+                  case parseURI uri of 
+                    Just x -> processLoop (makeCrawler x wlist) hfile
+                    Nothing -> error "Not a valid URL"
+                  hClose hfile
